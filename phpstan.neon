@@ -1,0 +1,34 @@
+parameters:
+    bootstrapFiles:
+        - tests/bootstrap.php
+
+    dynamicConstantNames:
+        - YII_DEBUG
+        - YII_ENV
+        - YII_ENV_DEV
+        - YII_ENV_PROD
+        - YII_ENV_TEST
+
+    ignoreErrors:
+        - '#PHPDoc tag @throws with type davidhirtz\\yii2\\translation\\tests\\support\\_generated\\ModuleException is not subtype of Throwable#'
+
+    level: 5
+
+    paths:
+        - src
+        - tests
+
+    excludePaths:
+        - tests/_output/*
+
+    scanFiles:
+        - vendor/davidhirtz/yii2-skeleton/Yii.php
+
+    stubFiles:
+        - vendor/davidhirtz/yii2-skeleton/stubs/yii/BaseYii.stub
+
+    earlyTerminatingMethodCalls:
+        yii\base\Application:
+            - end
+        yii\base\ErrorHandler:
+            - convertExceptionToError
