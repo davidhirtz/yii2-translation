@@ -6,7 +6,7 @@ Exports and imports translations from Excel file. Currently only works with mess
 ## Installation
 
 ```bash
-composer require davidhirtz/yii2-translation -D
+composer require davidhirtz/yii2-translation --dev
 ```
 
 ## Export translations
