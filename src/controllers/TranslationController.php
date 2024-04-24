@@ -20,6 +20,7 @@ class TranslationController extends Controller
 {
     use ControllerTrait;
 
+    public ?string $docBlock = null;
     public string $messagePath = '@messages';
     public bool $sort = true;
 
@@ -59,8 +60,8 @@ class TranslationController extends Controller
         $messages = [];
 
         foreach ($files as $file) {
-            $category = pathinfo((string) $file, PATHINFO_FILENAME);
-            $language = pathinfo(dirname((string) $file), PATHINFO_FILENAME);
+            $category = pathinfo((string)$file, PATHINFO_FILENAME);
+            $language = pathinfo(dirname((string)$file), PATHINFO_FILENAME);
             $messages[$category][$language] = require $file;
         }
 
@@ -100,9 +101,8 @@ class TranslationController extends Controller
 
             $worksheet->freezePane('B2');
 
-            $style = $worksheet->getStyle(1);
-            $style->getFont()->setBold(true);
-            $style->getProtection()->setLocked(Protection::PROTECTION_INHERIT);
+            $worksheet->getStyle(1)->getFont()->setBold(true);
+            $worksheet->getStyle(1)->getProtection()->setLocked(Protection::PROTECTION_INHERIT);
 
             foreach ($worksheet->getColumnIterator() as $column) {
                 $worksheet->getColumnDimension($column->getColumnIndex())->setAutoSize(true);
@@ -155,7 +155,7 @@ class TranslationController extends Controller
                         $source = $value;
                         $messages[Yii::$app->sourceLanguage][$source] = '';
                     } else {
-                        $messages[$languages[$key]][$source] = $value;
+                        $messages[$languages[$key]][$source] = $value ?? '';
                     }
                 }
             }
@@ -164,9 +164,12 @@ class TranslationController extends Controller
                 $filename = "$messagePath/$language/$category.php";
                 FileHelper::createDirectory(dirname($filename));
 
+                $content = "<?php\n";
+
                 if (file_exists($filename)) {
                     $existing = require $filename;
                     $translations = [...$existing, ...$translations];
+                    $content .= $this->getPhpDocBlock($filename) ?? "\n";
                 }
 
                 if ($this->sort) {
@@ -174,12 +177,7 @@ class TranslationController extends Controller
                 }
 
                 $array = VarDumper::export($translations);
-                $content = <<<EOD
-<?php
-
-return $array;
-
-EOD;
+                $content .= "return $array;\n";
 
                 if (file_put_contents($filename, $content, LOCK_EX) === false) {
                     $this->interactiveDoneStdout(false);
@@ -190,5 +188,28 @@ EOD;
 
         $this->interactiveDoneStdout();
         return ExitCode::OK;
+    }
+
+    private function getPhpDocBlock(string $filePath): ?string
+    {
+        $lines = file($filePath);
+        $isDocBlock = false;
+        $phpDoc = [];
+
+        foreach ($lines as $line) {
+            if (str_starts_with($line, '/**')) {
+                $isDocBlock = true;
+            }
+
+            if ($isDocBlock) {
+                $phpDoc[] = $line;
+            }
+
+            if (str_ends_with($line, "*/\n")) {
+                break;
+            }
+        }
+
+        return $phpDoc ? implode('', $phpDoc) : null;
     }
 }
