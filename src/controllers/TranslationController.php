@@ -57,6 +57,8 @@ class TranslationController extends Controller
             'recursive' => true,
         ]);
 
+        sort($files);
+
         $messages = [];
 
         foreach ($files as $file) {
@@ -75,22 +77,24 @@ class TranslationController extends Controller
             $worksheet = new Worksheet($spreadsheet, $category);
             $spreadsheet->addSheet($worksheet, $index++);
 
-            $worksheet->getProtection()->setSheet(true)
+            $worksheet->getProtection()
+                ->setSheet(true)
                 ->setFormatColumns(false);
 
+            $forcedTranslation = $this->hasForcedTranslation($category);
+
             $rows = [
-                array_unique([
-                    Yii::$app->sourceLanguage,
-                    ...array_keys($languages),
-                ]),
+                $forcedTranslation
+                    ? ['key', ...array_keys($languages)]
+                    : array_unique([Yii::$app->sourceLanguage, ...array_keys($languages)]),
             ];
 
-            foreach ($languages[Yii::$app->sourceLanguage] as $source => $translation) {
-                $row = [$source];
+            foreach ($languages[Yii::$app->sourceLanguage] as $key => $translation) {
+                $row = [$key];
 
                 foreach ($languages as $language => $translations) {
-                    if ($language !== Yii::$app->sourceLanguage) {
-                        $row[] = $translations[$source] ?? '';
+                    if ($language !== Yii::$app->sourceLanguage || $forcedTranslation) {
+                        $row[] = $translations[$key] ?? '';
                     }
                 }
 
@@ -142,7 +146,13 @@ class TranslationController extends Controller
             $data = $sheet->toArray();
             $languages = array_shift($data);
 
-            if (($languages[0] ?? null) !== Yii::$app->sourceLanguage) {
+            $forcedTranslation = $this->hasForcedTranslation($category);
+
+            if ($forcedTranslation) {
+                if (($languages[0] ?? null) !== 'key') {
+                    throw new Exception("Key must be the first column in worksheet \"$category\".");
+                }
+            } elseif (($languages[0] ?? null) !== Yii::$app->sourceLanguage) {
                 $language = Yii::$app->sourceLanguage;
                 throw new Exception("Source language \"$language\" must be the first column in worksheet \"$category\".");
             }
@@ -153,7 +163,10 @@ class TranslationController extends Controller
                 foreach ($values as $key => $value) {
                     if ($key === 0) {
                         $source = $value;
-                        $messages[Yii::$app->sourceLanguage][$source] = '';
+
+                        if (!$forcedTranslation) {
+                            $messages[Yii::$app->sourceLanguage][$source] = '';
+                        }
                     } else {
                         $messages[$languages[$key]][$source] = $value ?? '';
                     }
@@ -211,5 +224,12 @@ class TranslationController extends Controller
         }
 
         return $phpDoc ? implode('', $phpDoc) : null;
+    }
+
+    private function hasForcedTranslation(string $category): bool
+    {
+        return Yii::$app->getI18n()->translations[$category]['forceTranslation']
+            ?? Yii::$app->getI18n()->translations['*']['forceTranslation']
+            ?? false;
     }
 }
