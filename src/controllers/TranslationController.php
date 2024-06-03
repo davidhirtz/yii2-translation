@@ -157,6 +157,7 @@ class TranslationController extends Controller
                 throw new Exception("Source language \"$language\" must be the first column in worksheet \"$category\".");
             }
 
+            $languages = array_filter($languages);
             $messages = [];
 
             foreach ($data as $values) {
@@ -167,7 +168,7 @@ class TranslationController extends Controller
                         if (!$forcedTranslation) {
                             $messages[Yii::$app->sourceLanguage][$source] = '';
                         }
-                    } else {
+                    } elseif (array_key_exists($key, $languages)) {
                         $messages[$languages[$key]][$source] = $value ?? '';
                     }
                 }

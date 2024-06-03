@@ -10,6 +10,7 @@ use davidhirtz\yii2\translation\controllers\TranslationController;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Yii;
+use yii\i18n\PhpMessageSource;
 
 class TranslationControllerTest extends Unit
 {
@@ -44,13 +45,29 @@ class TranslationControllerTest extends Unit
         $filename = Yii::getAlias("$this->messagePath/translations.xlsx");
         self::assertFileExists($filename);
 
-        $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xlsx();
-        $reader->setReadDataOnly(true);
-        $spreadsheet = $reader->load($filename);
-        $worksheet = $spreadsheet->getSheetByName('app');
-        $data = $worksheet->toArray();
+        $data = $this->getArrayDataFromExcelFile($filename);
 
         self::assertEquals($data[0][0], Yii::$app->sourceLanguage);
+    }
+
+    /**
+     * @see TranslationController::actionExport()
+     */
+    public function testActionExportWithForcedTranslation(): void
+    {
+        $this->setForcedTranslation();
+
+        $this->controller->runAction('export', [
+            'messagePath' => '@tests/support/messages',
+            $this->messagePath,
+        ]);
+
+        $filename = Yii::getAlias("$this->messagePath/translations.xlsx");
+        self::assertFileExists($filename);
+
+        $data = $this->getArrayDataFromExcelFile($filename);
+
+        self::assertEquals(['key', 'de', 'en-US'], $data[0]);
     }
 
     /**
@@ -78,6 +95,23 @@ class TranslationControllerTest extends Unit
     {
         $language = Yii::$app->sourceLanguage;
         self::expectExceptionMessage("Source language \"$language\" must be the first column in worksheet \"app\".");
+
+        $filename = $this->getTestExcelFile([
+            ['de', $language],
+        ]);
+
+        $this->controller->runAction('import', [$filename]);
+    }
+
+    /**
+     * @see TranslationController::actionImport()
+     */
+    public function testActionImportWithForcedTranslationAndInvalidKeyColumn()
+    {
+        $this->setForcedTranslation();
+
+        $language = Yii::$app->sourceLanguage;
+        self::expectExceptionMessage("Key must be the first column in worksheet \"app\".");
 
         $filename = $this->getTestExcelFile([
             ['de', $language],
@@ -134,6 +168,30 @@ class TranslationControllerTest extends Unit
         self::assertEquals('Sprache', $data['Language']);
     }
 
+    public function testActionImportWithForcedTranslation()
+    {
+        $this->setForcedTranslation();
+
+        $filename = $this->getTestExcelFile([
+            ['key', 'en-US', 'de'],
+            ['TEST_STRING', 'This is a test string', 'Das ist ein Teststring'],
+        ]);
+
+        $this->controller->runAction('import', [
+            'messagePath' => $this->messagePath,
+            $filename,
+        ]);
+
+        self::assertFileExists(Yii::getAlias('@runtime/messages/en-US/app.php'));
+        self::assertFileExists(Yii::getAlias('@runtime/messages/de/app.php'));
+
+        $data = require Yii::getAlias('@runtime/messages/en-US/app.php');
+        self::assertEquals('This is a test string', $data['TEST_STRING']);
+
+        $data = require Yii::getAlias('@runtime/messages/de/app.php');
+        self::assertEquals('Das ist ein Teststring', $data['TEST_STRING']);
+    }
+
     protected function getTestExcelFile(array $data): string
     {
         $spreadsheet = new Spreadsheet();
@@ -150,6 +208,24 @@ class TranslationControllerTest extends Unit
         $writer->save($filename);
 
         return $filename;
+    }
+
+    protected function setForcedTranslation(): void
+    {
+        Yii::$app->getI18n()->translations['app'] = [
+            'class' => PhpMessageSource::class,
+            'forceTranslation' => true,
+        ];
+    }
+
+    protected function getArrayDataFromExcelFile(string $filename): array
+    {
+        $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xlsx();
+        $reader->setReadDataOnly(true);
+        $spreadsheet = $reader->load($filename);
+        $worksheet = $spreadsheet->getSheetByName('app');
+
+        return $worksheet->toArray();
     }
 }
 

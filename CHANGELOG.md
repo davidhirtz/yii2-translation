@@ -1,3 +1,8 @@
+## 1.1.1 (Jun 3, 2024)
+
+- Added tests for `forceTranslation`
+- Fixed import with empty columns at the end
+
 ## 1.1.0 (Jun 3, 2024)
 
 - Added support for translations with enabled `forceTranslation` option
