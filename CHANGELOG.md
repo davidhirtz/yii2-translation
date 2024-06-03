@@ -1,3 +1,7 @@
+## 1.1.2 (Jun 3, 2024)
+
+- Added configurable width for cells
+
 ## 1.1.1 (Jun 3, 2024)
 
 - Added tests for `forceTranslation`

@@ -5,6 +5,7 @@ namespace davidhirtz\yii2\translation\controllers;
 use davidhirtz\yii2\skeleton\console\controllers\traits\ControllerTrait;
 use davidhirtz\yii2\skeleton\helpers\FileHelper;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Protection;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -23,6 +24,7 @@ class TranslationController extends Controller
     public ?string $docBlock = null;
     public string $messagePath = '@messages';
     public bool $sort = true;
+    public int $width = 100;
 
     public function init(): void
     {
@@ -36,6 +38,7 @@ class TranslationController extends Controller
             ...parent::options($actionID),
             'messagePath',
             'sort',
+            'width'
         ];
     }
 
@@ -109,7 +112,17 @@ class TranslationController extends Controller
             $worksheet->getStyle(1)->getProtection()->setLocked(Protection::PROTECTION_INHERIT);
 
             foreach ($worksheet->getColumnIterator() as $column) {
-                $worksheet->getColumnDimension($column->getColumnIndex())->setAutoSize(true);
+                $columnIndex = $column->getColumnIndex();
+
+                $worksheet->getColumnDimension($columnIndex)
+                    ->setWidth($this->width);
+
+                foreach ($column->getCellIterator() as $cell) {
+                    $cell->getStyle()
+                        ->getAlignment()
+                        ->setVertical(Alignment::VERTICAL_TOP)
+                        ->setWrapText(true);
+                }
             }
         }
 
