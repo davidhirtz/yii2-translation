@@ -1,4 +1,4 @@
-## 3.0.0 (in development)
+## 3.0.0 (October 2, 2026)
 
 - Renamed the namespace from `davidhirtz\yii2\translation\` to `Hirtz\Translation\`; the controller is `Console\Controllers\TranslationController`
 - Requires PHP `^8.3`, `davidhirtz/yii2-skeleton` `^3.8` and `phpoffice/phpspreadsheet` `^5.0`
