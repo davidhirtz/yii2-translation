@@ -1,9 +1,9 @@
 {
   "name": "davidhirtz/yii2-translation",
-  "description": "Exports and imports translations from Excel file",
+  "description": "Exports message translations to an Excel file and imports them back",
   "license": "proprietary",
   "type": "yii2-extension",
-  "homepage": "https://www.davidhirtz.com/",
+  "homepage": "https://www.github.com/davidhirtz/yii2-translation",
   "authors": [
     {
       "name": "David Hirtz",
@@ -11,54 +11,39 @@
     }
   ],
   "require": {
-    "davidhirtz/yii2-skeleton": "^2.3.2",
-    "phpoffice/phpspreadsheet": "^2.0"
+    "php": "^8.3",
+    "davidhirtz/yii2-skeleton": "^3.8",
+    "phpoffice/phpspreadsheet": "^5.0"
   },
   "require-dev": {
-    "codeception/codeception": "^5.0",
-    "codeception/verify": "^3.0",
-    "codeception/specify": "^2.0",
-    "phpunit/phpunit": "^9",
-    "codeception/module-yii2": "*",
-    "codeception/module-asserts": "*",
-    "rector/rector": "^1.0",
-    "symplify/easy-coding-standard": "^12.0",
-    "yiisoft/yii2-debug": "^2.1",
-    "codeception/module-filesystem": "^3.0"
+    "phpstan/phpstan": "^2.1",
+    "phpunit/phpunit": "^12.5"
   },
+  "minimum-stability": "dev",
+  "prefer-stable": true,
   "autoload": {
     "psr-4": {
-      "davidhirtz\\yii2\\translation\\": "src"
+      "Hirtz\\Translation\\": "src"
     }
   },
   "autoload-dev": {
     "psr-4": {
-      "davidhirtz\\yii2\\translation\\tests\\": "tests"
-    }
-  },
-  "config": {
-    "platform": {
-      "php": "8.1"
-    },
-    "allow-plugins": {
-      "yiisoft/yii2-composer": true,
-      "phpro/grumphp-shim": true
+      "Hirtz\\Translation\\Tests\\": "tests"
     }
   },
   "extra": {
-    "bootstrap": "davidhirtz\\yii2\\translation\\Bootstrap"
-  },
-  "repositories": [
-    {
-      "type": "composer",
-      "url": "https://asset-packagist.org"
+    "bootstrap": "Hirtz\\Translation\\Bootstrap",
+    "branch-alias": {
+      "dev-main": "3.x-dev"
     }
-  ],
+  },
+  "config": {
+    "allow-plugins": {
+      "yiisoft/yii2-composer": true
+    }
+  },
   "scripts": {
-    "check-cs": "ecs check --ansi",
-    "fix-cs": "ecs check --ansi --fix",
-    "phpstan": "phpstan --memory-limit=1G",
-    "rector": "rector",
-    "test": "codecept run"
+    "phpstan": "phpstan --memory-limit=2G",
+    "test": "phpunit"
   }
 }

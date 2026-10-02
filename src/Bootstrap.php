@@ -1,20 +1,25 @@
 <?php
 
-namespace davidhirtz\yii2\translation;
+declare(strict_types=1);
 
-use davidhirtz\yii2\translation\controllers\TranslationController;
+namespace Hirtz\Translation;
+
+use Hirtz\Skeleton\Console\Application as ConsoleApplication;
+use Hirtz\Skeleton\Models\User;
+use Hirtz\Skeleton\Web\Application;
+use Hirtz\Translation\Console\Controllers\TranslationController;
 use yii\base\BootstrapInterface;
-use yii\console\Application;
 
 class Bootstrap implements BootstrapInterface
 {
     /**
-     * @param Application $app
+     * @param Application<User>|ConsoleApplication $app
      */
     public function bootstrap($app): void
     {
-        if ($app->getRequest()->getIsConsoleRequest()) {
-            $app->controllerMap['translation'] = TranslationController::class;
+        // Not `getIsConsoleRequest()`, which a web application under the CLI SAPI answers `true` as well
+        if ($app instanceof ConsoleApplication) {
+            $app->controllerMap['translation'] ??= TranslationController::class;
         }
     }
 }

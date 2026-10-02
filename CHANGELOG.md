@@ -1,3 +1,10 @@
+## 3.0.0 (in development)
+
+- Renamed the namespace from `davidhirtz\yii2\translation\` to `Hirtz\Translation\`; the controller is `Console\Controllers\TranslationController`
+- Requires PHP `^8.3`, `davidhirtz/yii2-skeleton` `^3.8` and `phpoffice/phpspreadsheet` `^5.0`
+- Changed `translation/import` to take the file as a required argument
+- Replaced the unused `TranslationController::$docBlock` with `$phpDocBlock`, the docblock of a file the import creates
+
 ## 1.1.2 (Jun 3, 2024)
 
 - Added configurable width for cells
