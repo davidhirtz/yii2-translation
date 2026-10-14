@@ -108,11 +108,20 @@ class TranslationController extends Controller
         $reader = new XlsxReader();
         $reader->setReadDataOnly(true);
 
+        $messages = [];
+
+        // Every worksheet is read before anything is written, so a refused one leaves no file half imported
         foreach ($reader->load($source)->getAllSheets() as $worksheet) {
-            $category = $worksheet->getTitle();
+            $category = $this->validateFilename($worksheet->getTitle());
 
             foreach ($this->readWorksheet($worksheet, $category) as $language => $translations) {
-                if (!$this->saveMessages($category, $language, $translations)) {
+                $messages[$category][$this->validateFilename($language)] = $translations;
+            }
+        }
+
+        foreach ($messages as $category => $translationsByLanguage) {
+            foreach ($translationsByLanguage as $language => $translations) {
+                if (!$this->saveMessages($category, (string)$language, $translations)) {
                     $this->interactiveDoneStdout(false);
                     return ExitCode::UNSPECIFIED_ERROR;
                 }
@@ -268,6 +277,18 @@ class TranslationController extends Controller
         $content = "<?php\n" . ($docBlock !== null ? "$docBlock\n" : '') . 'return ' . VarDumper::export($translations) . ";\n";
 
         return file_put_contents($filename, $content, LOCK_EX) !== false;
+    }
+
+    /**
+     * A worksheet title and a header cell name the file written, so neither may leave `messagePath`.
+     */
+    protected function validateFilename(string $name): string
+    {
+        if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9_.-]*$/D', $name)) {
+            throw new Exception("\"$name\" is not a valid category or language.");
+        }
+
+        return $name;
     }
 
     /**

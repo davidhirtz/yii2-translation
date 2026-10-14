@@ -112,6 +112,37 @@ class TranslationControllerTest extends TestCase
         $this->import([['de', 'en-US']]);
     }
 
+    public function testActionImportRefusesALanguageLeavingTheMessagePath(): void
+    {
+        $this->writeMessageFile('de', ['Key' => 'Schlüssel']);
+
+        try {
+            $this->import([
+                ['en-US', 'de', '../config'],
+                ['Key', 'Anderer Schlüssel', 'attacker'],
+            ]);
+
+            self::fail('The import must be refused.');
+        } catch (Exception $exception) {
+            self::assertSame('"../config" is not a valid category or language.', $exception->getMessage());
+        }
+
+        self::assertDirectoryDoesNotExist(dirname($this->path) . '/config');
+        self::assertSame(['Key' => 'Schlüssel'], $this->readMessageFile('de'));
+    }
+
+    public function testActionImportRefusesACategoryLeavingTheMessagePath(): void
+    {
+        $spreadsheet = new Spreadsheet();
+        $spreadsheet->getSheet(0)->setTitle('..')->fromArray([['en-US']]);
+
+        $filename = "$this->path/app.xlsx";
+        new XlsxWriter($spreadsheet)->save($filename);
+
+        $this->expectExceptionMessage('".." is not a valid category or language.');
+        $this->createController()->runAction('import', ['messagePath' => $this->path, $filename]);
+    }
+
     public function testActionImportWithForcedTranslationAndInvalidKeyColumn(): void
     {
         $this->setForcedTranslation();
