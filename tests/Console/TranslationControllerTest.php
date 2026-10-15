@@ -137,7 +137,7 @@ class TranslationControllerTest extends TestCase
         $spreadsheet->getSheet(0)->setTitle('..')->fromArray([['en-US']]);
 
         $filename = "$this->path/app.xlsx";
-        new XlsxWriter($spreadsheet)->save($filename);
+        (new XlsxWriter($spreadsheet))->save($filename);
 
         $this->expectExceptionMessage('".." is not a valid category or language.');
         $this->createController()->runAction('import', ['messagePath' => $this->path, $filename]);
