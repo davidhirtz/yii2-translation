@@ -1,6 +1,10 @@
 ## Unreleased
 
 - Added `--categories` (`-c`) and `--languages` (`-l`) to `translation/export` and `translation/import`
+- Added `--missing` (`-m`) and `--format=xliff` (`-f`) to `translation/export`, and XLIFF to `translation/import`
+- Added `translation/status`
+- Changed `translation/import` to refuse translations whose ICU arguments differ from the source
+- Moved the export and import out of `TranslationController` into `Models\Actions\ExportMessages` and `ImportMessages`, the message files into `Models\MessageFiles` and the workbook into `Formats\Xlsx`
 
 ## 3.0.0 (October 2, 2026)
 

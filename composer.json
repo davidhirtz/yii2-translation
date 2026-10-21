@@ -1,6 +1,6 @@
 {
   "name": "davidhirtz/yii2-translation",
-  "description": "Exports message translations to an Excel file and imports them back",
+  "description": "Exports message translations to Excel or XLIFF and imports them back",
   "license": "proprietary",
   "type": "yii2-extension",
   "homepage": "https://www.github.com/davidhirtz/yii2-translation",
@@ -12,6 +12,7 @@
   ],
   "require": {
     "php": "^8.3",
+    "ext-dom": "*",
     "davidhirtz/yii2-skeleton": "^3.8",
     "phpoffice/phpspreadsheet": "^5.0"
   },

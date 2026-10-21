@@ -9,10 +9,13 @@ use Hirtz\Skeleton\Helpers\FileHelper;
 use Hirtz\Skeleton\Test\TestCase;
 use Hirtz\Skeleton\Test\Traits\StdOutBufferControllerTrait;
 use Hirtz\Translation\Console\Controllers\TranslationController;
+use Hirtz\Translation\Formats\Xliff;
 use Override;
 use PhpOffice\PhpSpreadsheet\Reader\Xlsx as XlsxReader;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Protection;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 use Yii;
 use yii\console\Exception;
@@ -110,8 +113,7 @@ class TranslationControllerTest extends TestCase
             ['Language', '', '', 'Sprache'],
         ], $this->readExport('translations-fr-de.xlsx'));
 
-        $worksheet = (new XlsxReader())->load("$this->path/translations-fr-de.xlsx")->getSheetByName('app')
-            ?? self::fail('The export has no "app" worksheet.');
+        $worksheet = $this->loadWorksheet('translations-fr-de.xlsx');
 
         self::assertSame(Protection::PROTECTION_INHERIT, $worksheet->getStyle('B2')->getProtection()->getLocked());
         self::assertSame(Protection::PROTECTION_UNPROTECTED, $worksheet->getStyle('C2')->getProtection()->getLocked());
@@ -122,8 +124,7 @@ class TranslationControllerTest extends TestCase
         $this->setForcedTranslation();
         $this->export(self::FIXTURE_PATH, ['languages' => 'en-US']);
 
-        $worksheet = (new XlsxReader())->load("$this->path/translations-en-US.xlsx")->getSheetByName('app')
-            ?? self::fail('The export has no "app" worksheet.');
+        $worksheet = $this->loadWorksheet('translations-en-US.xlsx');
 
         self::assertSame([['key', 'en-US'], ['Language', '']], $worksheet->toArray(''));
         self::assertSame(Protection::PROTECTION_UNPROTECTED, $worksheet->getStyle('B2')->getProtection()->getLocked());
@@ -150,6 +151,90 @@ class TranslationControllerTest extends TestCase
     {
         $this->expectExceptionMessage('No message files found for category "other".');
         $this->createController()->runAction('export', ['messagePath' => self::FIXTURE_PATH, 'categories' => 'other', $this->path]);
+    }
+
+    public function testActionExportWithMissing(): void
+    {
+        $this->setForcedTranslation();
+        $this->writeMessageFile('en-US', ['A' => 'a', 'B' => 'b']);
+        $this->writeMessageFile('de', ['A' => 'A auf Deutsch', 'B' => '']);
+
+        $this->export($this->path, ['languages' => 'de', 'missing' => true]);
+
+        self::assertSame([
+            ['key', 'en-US', 'de'],
+            ['B', 'b', ''],
+        ], $this->readExport('translations-de.xlsx'));
+    }
+
+    public function testActionExportWithMissingAndNothingMissing(): void
+    {
+        $this->setForcedTranslation();
+        $this->writeMessageFile('de', ['A' => 'A auf Deutsch']);
+
+        $controller = $this->createController();
+        $exitCode = $controller->runAction('export', [
+            'messagePath' => $this->path,
+            'languages' => 'de',
+            'missing' => true,
+            $this->path,
+        ]);
+
+        self::assertSame(ExitCode::OK, $exitCode);
+        self::assertStringContainsString('No translations are missing.', $controller->flushStdOutBuffer());
+        self::assertFileDoesNotExist("$this->path/translations-de.xlsx");
+    }
+
+    public function testActionExportAlignsRightToLeftLanguages(): void
+    {
+        $this->export(self::FIXTURE_PATH, ['languages' => 'ar,de']);
+        $worksheet = $this->loadWorksheet('translations-ar-de.xlsx');
+
+        self::assertSame(Alignment::READORDER_RTL, $worksheet->getStyle('B2')->getAlignment()->getReadOrder());
+        self::assertSame(Alignment::READORDER_CONTEXT, $worksheet->getStyle('C2')->getAlignment()->getReadOrder());
+    }
+
+    public function testActionExportWithInvalidFormat(): void
+    {
+        $this->expectExceptionMessage('Format must be "xlsx" or "xliff".');
+        $this->createController()->runAction('export', ['messagePath' => self::FIXTURE_PATH, 'format' => 'csv', $this->path]);
+    }
+
+    /**
+     * The source language is no target of its own.
+     */
+    public function testActionExportXliff(): void
+    {
+        $this->setForcedTranslation();
+        $this->writeMessageFile('en-US', ['A' => 'Hello {name}', 'B' => 'b']);
+        $this->writeMessageFile('de', ['A' => 'Hallo {name}']);
+
+        $this->export($this->path, ['format' => 'xliff']);
+
+        self::assertFileDoesNotExist("$this->path/translations-en-US.xlf");
+
+        $xml = file_get_contents("$this->path/translations-de.xlf");
+        self::assertNotFalse($xml);
+
+        self::assertStringContainsString('<file original="app" datatype="plaintext" source-language="en-US" target-language="de">', $xml);
+        self::assertStringContainsString('<source>Hello {name}</source>', $xml);
+        self::assertStringContainsString('<target state="translated">Hallo {name}</target>', $xml);
+        self::assertStringContainsString('state="needs-translation"', $xml);
+
+        self::assertSame(['app' => ['de' => ['A' => 'Hallo {name}', 'B' => '']]], Xliff::read("$this->path/translations-de.xlf"));
+    }
+
+    public function testActionExportXliffWithMissing(): void
+    {
+        $this->setForcedTranslation();
+        $this->writeMessageFile('en-US', ['A' => 'a', 'B' => 'b']);
+        $this->writeMessageFile('de', ['A' => 'A auf Deutsch', 'B' => 'B auf Deutsch']);
+        $this->writeMessageFile('fr', ['A' => 'A en français']);
+
+        $this->export($this->path, ['format' => 'xliff', 'missing' => true]);
+
+        self::assertFileDoesNotExist("$this->path/translations-de.xlf");
+        self::assertSame(['app' => ['fr' => ['B' => '']]], Xliff::read("$this->path/translations-fr.xlf"));
     }
 
     public function testActionExportWithoutMessageFiles(): void
@@ -290,8 +375,103 @@ class TranslationControllerTest extends TestCase
 
     public function testActionImportWithUnknownCategory(): void
     {
-        $this->expectExceptionMessage('The workbook has no worksheet "other".');
+        $this->expectExceptionMessage('The file has no category "other".');
         $this->import([['en-US', 'de']], ['categories' => 'other']);
+    }
+
+    public function testActionImportRefusesTranslationsWithOtherArguments(): void
+    {
+        $this->writeMessageFile('de', ['Hello {name}' => 'Hallo {name}']);
+
+        try {
+            $this->import([
+                ['en-US', 'de', 'fr'],
+                ['Hello {name}', 'Hallo {nom}', 'Bonjour {name}'],
+                ['{n, plural, one{# file} other{# files}}', '{n, plural, one{# Datei} other{# Dateien}}', '{n, plural, one{# fichier} other{# fichiers'],
+            ]);
+
+            self::fail('The import must be refused.');
+        } catch (Exception $exception) {
+            self::assertSame(implode("\n", [
+                'These translations name other arguments than their source:',
+                '- app, de: Hello {name}',
+                '- app, fr: {n, plural, one{# file} other{# files}}',
+            ]), $exception->getMessage());
+        }
+
+        self::assertSame(['Hello {name}' => 'Hallo {name}'], $this->readMessageFile('de'));
+        self::assertFileDoesNotExist("$this->path/fr/app.php");
+    }
+
+    public function testActionImportWithForcedTranslationComparesArgumentsWithTheSourceFile(): void
+    {
+        $this->setForcedTranslation();
+        $this->writeMessageFile('en-US', ['GREETING' => 'Hello {name}']);
+
+        $this->expectExceptionMessage('- app, de: GREETING');
+        $this->import([['key', 'de'], ['GREETING', 'Hallo']]);
+    }
+
+    public function testActionImportXliffSkipsUnitsWithoutTarget(): void
+    {
+        $this->setForcedTranslation();
+        $this->writeMessageFile('de', ['A' => 'a', 'B' => 'b']);
+
+        $exitCode = $this->importXliff('app', <<<'XML'
+            <trans-unit id="A"><source>A</source><target>Neu</target></trans-unit>
+            <trans-unit id="B"><source>B</source><alt-trans><target>Vorschlag</target></alt-trans></trans-unit>
+            XML);
+
+        self::assertSame(ExitCode::OK, $exitCode);
+        self::assertSame(['A' => 'Neu', 'B' => 'b'], $this->readMessageFile('de'));
+    }
+
+    public function testActionImportXliffRefusesACategoryLeavingTheMessagePath(): void
+    {
+        $this->expectExceptionMessage('"../config" is not a valid category or language.');
+        $this->importXliff('../config', '<trans-unit id="A"><source>A</source><target>B</target></trans-unit>');
+    }
+
+    public function testActionImportWithInvalidXliff(): void
+    {
+        file_put_contents("$this->path/invalid.xlf", '<xliff');
+
+        $this->expectExceptionMessageMatches('/^Failed to read XLIFF file /');
+        $this->createController()->runAction('import', ['messagePath' => $this->path, "$this->path/invalid.xlf"]);
+    }
+
+    public function testActionStatus(): void
+    {
+        $this->setForcedTranslation();
+        $this->writeMessageFile('en-US', ['A' => 'Hello {name}', 'B' => 'b']);
+        $this->writeMessageFile('de', ['A' => 'Hallo {nom}', 'B' => 'B']);
+
+        $controller = $this->createController();
+        $exitCode = $controller->runAction('status', ['messagePath' => $this->path, 'languages' => 'de,fr']);
+
+        self::assertSame(ExitCode::DATAERR, $exitCode);
+        self::assertSame([
+            ['Category', 'Language', 'Translated', 'Missing', 'Invalid'],
+            ['app', 'de', '2/2', '0', '1'],
+            ['app', 'fr', '0/2', '2', '0'],
+        ], $this->parseTable($controller->flushStdOutBuffer()));
+    }
+
+    public function testActionStatusWithCompleteTranslations(): void
+    {
+        $this->setForcedTranslation();
+        $this->writeMessageFile('en-US', ['A' => 'Hello {name}']);
+        $this->writeMessageFile('de', ['A' => 'Hallo {name}']);
+
+        $controller = $this->createController();
+        $exitCode = $controller->runAction('status', ['messagePath' => $this->path]);
+
+        self::assertSame(ExitCode::OK, $exitCode);
+        self::assertSame([
+            ['Category', 'Language', 'Translated', 'Missing', 'Invalid'],
+            ['app', 'de', '1/1', '0', '0'],
+            ['app', 'en-US', '1/1', '0', '0'],
+        ], $this->parseTable($controller->flushStdOutBuffer()));
     }
 
     public function testActionImportWithForcedTranslation(): void
@@ -371,6 +551,35 @@ class TranslationControllerTest extends TestCase
     }
 
     /**
+     * Keys with line breaks, surrounding spaces and markup survive the attributes and text nodes.
+     */
+    public function testExportAndImportXliffRoundTrip(): void
+    {
+        $translations = [
+            ' Spaced ' => ' Mit Leerzeichen ',
+            '<b>Markup</b> & more' => '<b>Auszeichnung</b> & mehr',
+            'Emoji' => 'Übersetzung 🌍',
+            "Line 1\nLine 2" => "Zeile 1\nZeile 2",
+            'NFD' => "Mu\u{308}ller",
+            'Polish' => 'Tłumaczenie ą',
+        ];
+
+        ksort($translations);
+
+        $this->writeMessageFile('en-US', array_fill_keys(array_keys($translations), ''));
+        $this->writeMessageFile('de', $translations);
+        $before = $this->readMessageFileContent('de');
+
+        $this->export($this->path, ['format' => 'xliff']);
+
+        $controller = $this->createController();
+        $exitCode = $controller->runAction('import', ['messagePath' => $this->path, "$this->path/translations-de.xlf"]);
+
+        self::assertSame(ExitCode::OK, $exitCode);
+        self::assertSame($before, $this->readMessageFileContent('de'));
+    }
+
+    /**
      * @param array<string, mixed> $params
      */
     private function export(string $messagePath, array $params = []): void
@@ -417,6 +626,44 @@ class TranslationControllerTest extends TestCase
             ?? self::fail('The export has no "app" worksheet.');
 
         return $worksheet->toArray('');
+    }
+
+    private function importXliff(string $category, string $units): int
+    {
+        $filename = "$this->path/de.xlf";
+
+        file_put_contents($filename, <<<XML
+            <?xml version="1.0" encoding="UTF-8"?>
+            <xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+              <file original="$category" source-language="en-US" target-language="de" datatype="plaintext">
+                <body>$units</body>
+              </file>
+            </xliff>
+            XML);
+
+        return $this->createController()->runAction('import', ['messagePath' => $this->path, $filename]);
+    }
+
+    private function loadWorksheet(string $filename): Worksheet
+    {
+        return (new XlsxReader())->load("$this->path/$filename")->getSheetByName('app')
+            ?? self::fail('The export has no "app" worksheet.');
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    private function parseTable(string $output): array
+    {
+        $rows = [];
+
+        foreach (explode("\n", $output) as $line) {
+            if (preg_match_all('/[\w\/-]+/u', $line, $matches)) {
+                $rows[] = $matches[0];
+            }
+        }
+
+        return $rows;
     }
 
     /**

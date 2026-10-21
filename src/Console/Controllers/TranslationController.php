@@ -5,26 +5,18 @@ declare(strict_types=1);
 namespace Hirtz\Translation\Console\Controllers;
 
 use Hirtz\Skeleton\Console\Controllers\Traits\ControllerTrait;
-use Hirtz\Skeleton\Helpers\FileHelper;
+use Hirtz\Translation\Models\Actions\ExportMessages;
+use Hirtz\Translation\Models\Actions\ImportMessages;
+use Hirtz\Translation\Models\MessageFiles;
 use Override;
-use PhpOffice\PhpSpreadsheet\Cell\DataType;
-use PhpOffice\PhpSpreadsheet\Reader\Xlsx as XlsxReader;
-use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Style\Alignment;
-use PhpOffice\PhpSpreadsheet\Style\Protection;
-use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 use Yii;
-use yii\base\InvalidConfigException;
 use yii\console\Controller;
-use yii\console\Exception;
 use yii\console\ExitCode;
+use yii\console\widgets\Table;
 use yii\helpers\Console;
-use yii\helpers\VarDumper;
-use yii\i18n\MessageSource;
 
 /**
- * Exports message translations to an Excel file and imports them back.
+ * Exports message translations to an Excel or XLIFF file and imports them back.
  */
 class TranslationController extends Controller
 {
@@ -47,6 +39,9 @@ class TranslationController extends Controller
      */
     public array $languages = [];
 
+    public string $format = ExportMessages::FORMAT_XLSX;
+    public bool $missing = false;
+
     /**
      * The docblock of a message file the import creates; an existing file keeps its own.
      */
@@ -63,9 +58,11 @@ class TranslationController extends Controller
             'categories',
             'languages',
             'messagePath',
-            'phpDocBlock',
-            'sort',
-            'width',
+            ...match ($actionID) {
+                'export' => ['format', 'missing', 'width'],
+                'import' => ['phpDocBlock', 'sort'],
+                default => [],
+            },
         ];
     }
 
@@ -75,344 +72,104 @@ class TranslationController extends Controller
     #[Override]
     public function optionAliases(): array
     {
-        return [...parent::optionAliases(), 'c' => 'categories', 'l' => 'languages'];
+        return [
+            ...parent::optionAliases(),
+            'c' => 'categories',
+            'f' => 'format',
+            'l' => 'languages',
+            'm' => 'missing',
+        ];
     }
 
     /**
-     * Exports translations to `translations.xlsx`, one worksheet per category.
+     * Exports translations to `translations.xlsx`, one worksheet per category, or one XLIFF file per language.
      */
     public function actionExport(?string $outputDir = null): int
     {
-        $outputDir = Yii::getAlias($outputDir ?? '@runtime');
         $languages = $this->getLanguages();
-        $filename = "$outputDir/" . implode('-', ['translations', ...$languages]) . '.xlsx';
 
-        $this->interactiveStartStdout('Exporting translations to ' . $this->ansiFormat($filename, Console::FG_CYAN) . ' ...');
+        $action = Yii::createObject(ExportMessages::class, [
+            'catalogs' => $this->getMessageFiles()->findCatalogs($this->categories, $languages),
+            'outputDir' => Yii::getAlias($outputDir ?? '@runtime'),
+            'format' => $this->format,
+            'missing' => $this->missing,
+            'languages' => $languages,
+            'width' => $this->width,
+        ]);
 
-        FileHelper::createDirectory($outputDir);
-
-        $spreadsheet = new Spreadsheet();
-        $spreadsheet->getDefaultStyle()->getProtection()->setLocked(Protection::PROTECTION_UNPROTECTED);
-        $spreadsheet->removeSheetByIndex(0);
-
-        $messages = $this->findMessages();
-
-        foreach ($this->categories as $category) {
-            if (!isset($messages[$category])) {
-                throw new Exception("No message files found for category \"$category\".");
-            }
-        }
-
-        if (!$messages) {
-            throw new Exception('No message files found in "' . $this->getMessagePath() . '".');
-        }
-
-        foreach ($messages as $category => $languages) {
-            $worksheet = new Worksheet($spreadsheet, $category);
-            $spreadsheet->addSheet($worksheet);
-
-            $this->writeWorksheet($worksheet, $category, $languages);
-        }
-
-        (new XlsxWriter($spreadsheet))->save($filename);
-
+        $this->interactiveStartStdout('Exporting translations ...');
+        $filenames = $action->run();
         $this->interactiveDoneStdout();
+
+        foreach ($filenames as $filename) {
+            $this->interactiveStdout('- ' . $this->ansiFormat($filename, Console::FG_CYAN) . PHP_EOL);
+        }
+
+        if (!$filenames) {
+            $this->stdout('No translations are missing.' . PHP_EOL);
+        }
+
         return ExitCode::OK;
     }
 
     /**
-     * Imports translations from an Excel file the export wrote, merged into the existing message files.
+     * Imports translations from an Excel or XLIFF file the export wrote, merged into the existing message files.
      */
     public function actionImport(string $source): int
     {
-        $source = Yii::getAlias($source);
-
-        if (!is_file($source)) {
-            throw new Exception("Failed to read source file \"$source\".");
-        }
-
-        $this->interactiveStartStdout('Importing translations ...');
-
-        $reader = new XlsxReader();
-        $reader->setReadDataOnly(true);
-
-        $spreadsheet = $reader->load($source);
-        $languages = $this->getLanguages();
-        $messages = [];
-
-        foreach ($this->categories as $category) {
-            if (!$spreadsheet->sheetNameExists($category)) {
-                throw new Exception("The workbook has no worksheet \"$category\".");
-            }
-        }
-
-        // Every worksheet is read before anything is written, so a refused one leaves no file half imported
-        foreach ($spreadsheet->getAllSheets() as $worksheet) {
-            $category = $this->validateFilename($worksheet->getTitle());
-
-            if ($this->categories && !in_array($category, $this->categories, true)) {
-                continue;
-            }
-
-            foreach ($this->readWorksheet($worksheet, $category) as $language => $translations) {
-                if (!$languages || in_array($language, $languages, true)) {
-                    $messages[$category][$this->validateFilename($language)] = $translations;
-                }
-            }
-        }
-
-        foreach ($messages as $category => $translationsByLanguage) {
-            foreach ($translationsByLanguage as $language => $translations) {
-                if (!$this->saveMessages($category, (string)$language, $translations)) {
-                    $this->interactiveDoneStdout(false);
-                    return ExitCode::UNSPECIFIED_ERROR;
-                }
-            }
-        }
-
-        $this->interactiveDoneStdout();
-        return ExitCode::OK;
-    }
-
-    /**
-     * @return array<string, array<string, array<string, string>>> translations by category and language
-     */
-    protected function findMessages(): array
-    {
-        $files = FileHelper::findFiles($this->getMessagePath(), [
-            'only' => ['*/*.php'],
+        $action = Yii::createObject(ImportMessages::class, [
+            'files' => $this->getMessageFiles(),
+            'source' => Yii::getAlias($source),
+            'categories' => $this->categories,
+            'languages' => $this->getLanguages(),
+            'phpDocBlock' => $this->phpDocBlock,
+            'sort' => $this->sort,
         ]);
 
-        sort($files);
+        $this->interactiveStartStdout('Importing translations ...');
+        $success = $action->run();
+        $this->interactiveDoneStdout($success);
 
-        $messages = [];
-
-        foreach ($files as $file) {
-            $category = pathinfo($file, PATHINFO_FILENAME);
-            $language = basename(dirname($file));
-
-            if ($this->categories && !in_array($category, $this->categories, true)) {
-                continue;
-            }
-
-            $messages[$category][$language] = $this->loadMessageFile($file);
-        }
-
-        return $messages;
+        return $success ? ExitCode::OK : ExitCode::UNSPECIFIED_ERROR;
     }
 
     /**
-     * A category without forced translation keys its messages by the source text, so the source language is the
-     * key column. With forced translation the keys are identifiers and the source language is a column of its own,
-     * prepended as a locked reference when `languages` does not name it.
-     *
-     * @param array<string, array<string, string>> $languages
+     * Lists the missing and invalid translations per category and language; exits with an error while any remain.
      */
-    protected function writeWorksheet(Worksheet $worksheet, string $category, array $languages): void
+    public function actionStatus(): int
     {
-        $sourceLanguage = $this->getSourceLanguage($category);
-        $forced = $this->hasForcedTranslation($category);
+        $rows = [];
+        $isComplete = true;
 
-        // The keys of every language, whichever are exported, so a language without a file gets every row
-        $keys = array_values(array_unique(array_merge(...array_values(array_map(array_keys(...), $languages)))));
+        foreach ($this->getMessageFiles()->findCatalogs($this->categories, $this->getLanguages()) as $catalog) {
+            foreach ($catalog->languages as $language) {
+                $missing = count($catalog->getMissingKeys($language));
+                $invalid = count($catalog->getInvalidKeys($language));
+                $total = count($catalog->keys);
 
-        $columns = $this->getLanguages() ?: array_keys($languages);
-        $hasReference = $forced && $this->languages && !in_array($sourceLanguage, $columns, true);
-
-        if ($hasReference) {
-            array_unshift($columns, $sourceLanguage);
-        }
-
-        if (!$forced) {
-            $columns = array_values(array_diff($columns, [$sourceLanguage]));
-        }
-
-        $rows = [[$forced ? 'key' : $sourceLanguage, ...$columns]];
-
-        foreach ($keys as $key) {
-            $row = [(string)$key];
-
-            foreach ($columns as $language) {
-                $row[] = $languages[$language][$key] ?? '';
-            }
-
-            $rows[] = $row;
-        }
-
-        // Every cell is written as a string: the default value binder would turn `=…` into a formula and a
-        // numeric translation into a number, which the import would read back as something else
-        foreach ($rows as $rowIndex => $row) {
-            foreach ($row as $columnIndex => $value) {
-                $worksheet->setCellValueExplicit([$columnIndex + 1, $rowIndex + 1], $value, DataType::TYPE_STRING);
+                $isComplete = $isComplete && !$missing && !$invalid;
+                $rows[] = [$catalog->category, $language, ($total - $missing) . "/$total", $missing, $invalid];
             }
         }
 
-        $worksheet->getProtection()
-            ->setSheet(true)
-            ->setFormatColumns(false);
+        $this->stdout(Table::widget([
+            'headers' => ['Category', 'Language', 'Translated', 'Missing', 'Invalid'],
+            'rows' => $rows,
+        ]));
 
-        $worksheet->freezePane('B2');
+        return $isComplete ? ExitCode::OK : ExitCode::DATAERR;
+    }
 
-        $header = $worksheet->getStyle('1:1');
-        $header->getFont()->setBold(true);
-        $header->getProtection()->setLocked(Protection::PROTECTION_INHERIT);
-
-        if ($hasReference) {
-            $worksheet->getStyle('B1:B' . count($rows))->getProtection()->setLocked(Protection::PROTECTION_INHERIT);
-        }
-
-        $worksheet->getStyle($worksheet->calculateWorksheetDimension())
-            ->getAlignment()
-            ->setVertical(Alignment::VERTICAL_TOP)
-            ->setWrapText(true);
-
-        foreach ($worksheet->getColumnIterator() as $column) {
-            $worksheet->getColumnDimension($column->getColumnIndex())->setWidth($this->width);
-        }
+    protected function getMessageFiles(): MessageFiles
+    {
+        return Yii::createObject(MessageFiles::class, [$this->messagePath]);
     }
 
     /**
-     * @return array<string, array<string, string>> translations by language
-     */
-    protected function readWorksheet(Worksheet $worksheet, string $category): array
-    {
-        $rows = $worksheet->toArray(formatData: false);
-        $header = array_map($this->toString(...), array_shift($rows) ?? []);
-
-        $sourceLanguage = $this->getSourceLanguage($category);
-        $forced = $this->hasForcedTranslation($category);
-
-        if ($forced) {
-            if (($header[0] ?? null) !== 'key') {
-                throw new Exception("Key must be the first column in worksheet \"$category\".");
-            }
-        } elseif (($header[0] ?? null) !== $sourceLanguage) {
-            throw new Exception("Source language \"$sourceLanguage\" must be the first column in worksheet \"$category\".");
-        }
-
-        // Excel keeps the width of a column that once held a value, so the header can end in empty cells
-        $languages = array_filter(array_slice($header, 1, preserve_keys: true));
-        $messages = [];
-
-        foreach ($rows as $row) {
-            $key = $this->toString($row[0] ?? null);
-
-            if ($key === '') {
-                continue;
-            }
-
-            if (!$forced) {
-                $messages[$sourceLanguage][$key] = '';
-            }
-
-            foreach ($languages as $index => $language) {
-                $messages[$language][$key] = $this->toString($row[$index] ?? null);
-            }
-        }
-
-        return $messages;
-    }
-
-    /**
-     * @param array<string, string> $translations
-     */
-    protected function saveMessages(string $category, string $language, array $translations): bool
-    {
-        $filename = $this->getMessagePath() . "/$language/$category.php";
-        FileHelper::createDirectory(dirname($filename));
-
-        $docBlock = $this->phpDocBlock;
-
-        if (is_file($filename)) {
-            // Not a spread: it renumbers integer keys, and a numeric message key is one
-            $translations = array_replace($this->loadMessageFile($filename), $translations);
-            $docBlock = $this->getPhpDocBlock($filename) ?? $docBlock;
-        }
-
-        if ($this->sort) {
-            ksort($translations);
-        }
-
-        $content = "<?php\n" . ($docBlock !== null ? "$docBlock\n" : '') . 'return ' . VarDumper::export($translations) . ";\n";
-
-        return file_put_contents($filename, $content, LOCK_EX) !== false;
-    }
-
-    /**
-     * A worksheet title and a header cell name the file written, so neither may leave `messagePath`.
-     */
-    protected function validateFilename(string $name): string
-    {
-        if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9_.-]*$/D', $name)) {
-            throw new Exception("\"$name\" is not a valid category or language.");
-        }
-
-        return $name;
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    protected function loadMessageFile(string $filename): array
-    {
-        $messages = require $filename;
-        $result = [];
-
-        foreach (is_array($messages) ? $messages : [] as $key => $value) {
-            $result[(string)$key] = $this->toString($value);
-        }
-
-        return $result;
-    }
-
-    /**
-     * A language names a column, which the import turns into a directory.
-     *
      * @return list<string>
      */
     private function getLanguages(): array
     {
-        return array_values(array_unique(array_map($this->validateFilename(...), $this->languages)));
-    }
-
-    /**
-     * Yii's `FileHelper::findFiles()` matches no `only` pattern below a path containing `..`.
-     */
-    private function getMessagePath(): string
-    {
-        return FileHelper::normalizePath(Yii::getAlias($this->messagePath));
-    }
-
-    private function getPhpDocBlock(string $filename): ?string
-    {
-        $content = file_get_contents($filename);
-        return $content !== false && preg_match('#^/\*\*.*?\*/#ms', $content, $matches) ? $matches[0] : null;
-    }
-
-    private function getSourceLanguage(string $category): string
-    {
-        return $this->getMessageSource($category)->sourceLanguage ?? Yii::$app->sourceLanguage;
-    }
-
-    private function hasForcedTranslation(string $category): bool
-    {
-        return $this->getMessageSource($category)->forceTranslation ?? false;
-    }
-
-    /**
-     * A category no message source is configured for is translated by nothing, so the defaults apply.
-     */
-    private function getMessageSource(string $category): ?MessageSource
-    {
-        try {
-            return Yii::$app->getI18n()->getMessageSource($category);
-        } catch (InvalidConfigException) {
-            return null;
-        }
-    }
-
-    private function toString(mixed $value): string
-    {
-        return is_scalar($value) ? (string)$value : '';
+        return array_values(array_unique(array_map(MessageFiles::validateName(...), $this->languages)));
     }
 }
