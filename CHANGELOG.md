@@ -1,4 +1,4 @@
-## Unreleased
+## 3.1.0 (October 21, 2026)
 
 - Added `--categories` (`-c`) and `--languages` (`-l`) to `translation/export` and `translation/import`
 - Added `--missing` (`-m`) and `--format=xliff` (`-f`) to `translation/export`, and XLIFF to `translation/import`
