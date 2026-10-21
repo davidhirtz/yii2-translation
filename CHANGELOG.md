@@ -1,3 +1,7 @@
+## Unreleased
+
+- Added `--categories` (`-c`) and `--languages` (`-l`) to `translation/export` and `translation/import`
+
 ## 3.0.0 (October 2, 2026)
 
 - Renamed the namespace from `davidhirtz\yii2\translation\` to `Hirtz\Translation\`; the controller is `Console\Controllers\TranslationController`

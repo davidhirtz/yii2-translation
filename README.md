@@ -32,6 +32,15 @@ How the columns are laid out depends on the category's message source:
 
 Every cell is written as text, so a translation that looks like a number or a formula survives the trip.
 
+`--languages` (`-l`) exports only the languages named, a language without message files included, as an empty
+column for its first translation; the file is then named after them (`translations-fr.xlsx`). A category with
+`forceTranslation` keeps the source language as a locked reference column unless it is named. `--categories`
+(`-c`) exports only the worksheets named:
+
+```bash
+./yii translation/export -l=fr -c=app,cms
+```
+
 ## Import
 
 ```bash
@@ -41,12 +50,15 @@ Every cell is written as text, so a translation that looks like a number or a fo
 Reads a workbook in the export's layout and merges each worksheet into `<messagePath>/<language>/<category>.php`.
 A translation present in the workbook replaces the one in the file, an empty cell included; a key the workbook
 lacks is kept. An existing file keeps its docblock, and the files are sorted by key as `yii message` sorts them,
-so a round trip without edits leaves the files unchanged.
+so a round trip without edits leaves the files unchanged. `--languages` and `--categories` import only the columns
+and worksheets named; a category the workbook lacks is refused.
 
 ## Options
 
 | Option          | Default     | Meaning                                                                |
 |-----------------|-------------|------------------------------------------------------------------------|
+| `--categories`  | `[]`        | The categories exported or imported, comma-separated; all when empty   |
+| `--languages`   | `[]`        | The languages exported or imported, comma-separated; all when empty    |
 | `--messagePath` | `@messages` | The directory holding one subdirectory per language                    |
 | `--phpDocBlock` | `null`      | The docblock of a message file the import creates                      |
 | `--sort`        | `true`      | Whether the import sorts the messages by key                           |

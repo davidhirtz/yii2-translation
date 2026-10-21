@@ -12,6 +12,7 @@ use Hirtz\Translation\Console\Controllers\TranslationController;
 use Override;
 use PhpOffice\PhpSpreadsheet\Reader\Xlsx as XlsxReader;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Protection;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 use Yii;
 use yii\console\Exception;
@@ -84,6 +85,71 @@ class TranslationControllerTest extends TestCase
             ['Only in German', 'Nur auf Deutsch'],
             ['Only in source', ''],
         ], $this->readExport());
+    }
+
+    /**
+     * A language without message files gets a column of its own, ready for its first translation.
+     */
+    public function testActionExportWithLanguages(): void
+    {
+        $this->export(self::FIXTURE_PATH, ['languages' => 'fr']);
+
+        self::assertSame([
+            ['en-US', 'fr'],
+            ['Language', ''],
+        ], $this->readExport('translations-fr.xlsx'));
+    }
+
+    public function testActionExportWithLanguagesAndForcedTranslationLocksTheSourceLanguage(): void
+    {
+        $this->setForcedTranslation();
+        $this->export(self::FIXTURE_PATH, ['languages' => 'fr,de']);
+
+        self::assertSame([
+            ['key', 'en-US', 'fr', 'de'],
+            ['Language', '', '', 'Sprache'],
+        ], $this->readExport('translations-fr-de.xlsx'));
+
+        $worksheet = (new XlsxReader())->load("$this->path/translations-fr-de.xlsx")->getSheetByName('app')
+            ?? self::fail('The export has no "app" worksheet.');
+
+        self::assertSame(Protection::PROTECTION_INHERIT, $worksheet->getStyle('B2')->getProtection()->getLocked());
+        self::assertSame(Protection::PROTECTION_UNPROTECTED, $worksheet->getStyle('C2')->getProtection()->getLocked());
+    }
+
+    public function testActionExportWithLanguagesNamingTheSourceLanguage(): void
+    {
+        $this->setForcedTranslation();
+        $this->export(self::FIXTURE_PATH, ['languages' => 'en-US']);
+
+        $worksheet = (new XlsxReader())->load("$this->path/translations-en-US.xlsx")->getSheetByName('app')
+            ?? self::fail('The export has no "app" worksheet.');
+
+        self::assertSame([['key', 'en-US'], ['Language', '']], $worksheet->toArray(''));
+        self::assertSame(Protection::PROTECTION_UNPROTECTED, $worksheet->getStyle('B2')->getProtection()->getLocked());
+    }
+
+    public function testActionExportWithInvalidLanguage(): void
+    {
+        $this->expectExceptionMessage('"../de" is not a valid category or language.');
+        $this->createController()->runAction('export', ['messagePath' => self::FIXTURE_PATH, 'languages' => '../de', $this->path]);
+    }
+
+    public function testActionExportWithCategories(): void
+    {
+        FileHelper::copyDirectory(self::FIXTURE_PATH, $this->path);
+        $this->writeMessageFile('de', ['Key' => 'Schlüssel'], 'other');
+
+        $this->export($this->path, ['categories' => 'other']);
+
+        $spreadsheet = (new XlsxReader())->load("$this->path/translations.xlsx");
+        self::assertSame(['other'], $spreadsheet->getSheetNames());
+    }
+
+    public function testActionExportWithUnknownCategory(): void
+    {
+        $this->expectExceptionMessage('No message files found for category "other".');
+        $this->createController()->runAction('export', ['messagePath' => self::FIXTURE_PATH, 'categories' => 'other', $this->path]);
     }
 
     public function testActionExportWithoutMessageFiles(): void
@@ -193,6 +259,41 @@ class TranslationControllerTest extends TestCase
         self::assertStringStartsWith("<?php\n/**\n * Message translations.\n", $this->readMessageFileContent('de'));
     }
 
+    public function testActionImportWithLanguages(): void
+    {
+        $this->import([
+            ['en-US', 'de', 'fr'],
+            ['Language', 'Sprache', 'Langue'],
+        ], ['languages' => 'fr']);
+
+        self::assertSame(['Language' => 'Langue'], $this->readMessageFile('fr'));
+        self::assertFileDoesNotExist("$this->path/de/app.php");
+        self::assertFileDoesNotExist("$this->path/en-US/app.php");
+    }
+
+    public function testActionImportWithCategories(): void
+    {
+        $spreadsheet = new Spreadsheet();
+        $spreadsheet->getSheet(0)->setTitle('app')->fromArray([['en-US', 'de'], ['Language', 'Sprache']]);
+        $spreadsheet->createSheet()->setTitle('other')->fromArray([['en-US', 'de'], ['Key', 'Schlüssel']]);
+
+        $filename = "$this->path/translations.xlsx";
+        (new XlsxWriter($spreadsheet))->save($filename);
+
+        $controller = $this->createController();
+        $exitCode = $controller->runAction('import', ['messagePath' => $this->path, 'categories' => 'other', $filename]);
+
+        self::assertSame(ExitCode::OK, $exitCode);
+        self::assertSame(['Key' => 'Schlüssel'], $this->readMessageFile('de', 'other'));
+        self::assertFileDoesNotExist("$this->path/de/app.php");
+    }
+
+    public function testActionImportWithUnknownCategory(): void
+    {
+        $this->expectExceptionMessage('The workbook has no worksheet "other".');
+        $this->import([['en-US', 'de']], ['categories' => 'other']);
+    }
+
     public function testActionImportWithForcedTranslation(): void
     {
         $this->setForcedTranslation();
@@ -269,9 +370,17 @@ class TranslationControllerTest extends TestCase
         self::assertSame($before, $this->readMessageFileContent('de'));
     }
 
-    private function export(string $messagePath): void
+    /**
+     * @param array<string, mixed> $params
+     */
+    private function export(string $messagePath, array $params = []): void
     {
-        $exitCode = $this->createController()->runAction('export', ['messagePath' => $messagePath, $this->path]);
+        $exitCode = $this->createController()->runAction('export', [
+            'messagePath' => $messagePath,
+            ...$params,
+            $this->path,
+        ]);
+
         self::assertSame(ExitCode::OK, $exitCode);
     }
 
@@ -299,12 +408,12 @@ class TranslationControllerTest extends TestCase
     /**
      * @return array<int, array<int, mixed>>
      */
-    private function readExport(): array
+    private function readExport(string $filename = 'translations.xlsx'): array
     {
         $reader = new XlsxReader();
         $reader->setReadDataOnly(true);
 
-        $worksheet = $reader->load("$this->path/translations.xlsx")->getSheetByName('app')
+        $worksheet = $reader->load("$this->path/$filename")->getSheetByName('app')
             ?? self::fail('The export has no "app" worksheet.');
 
         return $worksheet->toArray('');
@@ -313,18 +422,18 @@ class TranslationControllerTest extends TestCase
     /**
      * @param array<array-key, string> $messages
      */
-    private function writeMessageFile(string $language, array $messages): void
+    private function writeMessageFile(string $language, array $messages, string $category = 'app'): void
     {
         FileHelper::createDirectory("$this->path/$language");
-        file_put_contents("$this->path/$language/app.php", "<?php\nreturn " . VarDumper::export($messages) . ";\n");
+        file_put_contents("$this->path/$language/$category.php", "<?php\nreturn " . VarDumper::export($messages) . ";\n");
     }
 
     /**
      * @return array<array-key, mixed>
      */
-    private function readMessageFile(string $language): array
+    private function readMessageFile(string $language, string $category = 'app'): array
     {
-        $messages = require "$this->path/$language/app.php";
+        $messages = require "$this->path/$language/$category.php";
         self::assertIsArray($messages);
 
         return $messages;

@@ -38,6 +38,16 @@ class TranslationController extends Controller
     public string $messagePath = '@messages';
 
     /**
+     * @var list<string>
+     */
+    public array $categories = [];
+
+    /**
+     * @var list<string>
+     */
+    public array $languages = [];
+
+    /**
      * The docblock of a message file the import creates; an existing file keeps its own.
      */
     public ?string $phpDocBlock = null;
@@ -50,6 +60,8 @@ class TranslationController extends Controller
     {
         return [
             ...parent::options($actionID),
+            'categories',
+            'languages',
             'messagePath',
             'phpDocBlock',
             'sort',
@@ -58,12 +70,22 @@ class TranslationController extends Controller
     }
 
     /**
+     * @return array<string, string>
+     */
+    #[Override]
+    public function optionAliases(): array
+    {
+        return [...parent::optionAliases(), 'c' => 'categories', 'l' => 'languages'];
+    }
+
+    /**
      * Exports translations to `translations.xlsx`, one worksheet per category.
      */
     public function actionExport(?string $outputDir = null): int
     {
         $outputDir = Yii::getAlias($outputDir ?? '@runtime');
-        $filename = "$outputDir/translations.xlsx";
+        $languages = $this->getLanguages();
+        $filename = "$outputDir/" . implode('-', ['translations', ...$languages]) . '.xlsx';
 
         $this->interactiveStartStdout('Exporting translations to ' . $this->ansiFormat($filename, Console::FG_CYAN) . ' ...');
 
@@ -74,6 +96,12 @@ class TranslationController extends Controller
         $spreadsheet->removeSheetByIndex(0);
 
         $messages = $this->findMessages();
+
+        foreach ($this->categories as $category) {
+            if (!isset($messages[$category])) {
+                throw new Exception("No message files found for category \"$category\".");
+            }
+        }
 
         if (!$messages) {
             throw new Exception('No message files found in "' . $this->getMessagePath() . '".');
@@ -108,14 +136,28 @@ class TranslationController extends Controller
         $reader = new XlsxReader();
         $reader->setReadDataOnly(true);
 
+        $spreadsheet = $reader->load($source);
+        $languages = $this->getLanguages();
         $messages = [];
 
+        foreach ($this->categories as $category) {
+            if (!$spreadsheet->sheetNameExists($category)) {
+                throw new Exception("The workbook has no worksheet \"$category\".");
+            }
+        }
+
         // Every worksheet is read before anything is written, so a refused one leaves no file half imported
-        foreach ($reader->load($source)->getAllSheets() as $worksheet) {
+        foreach ($spreadsheet->getAllSheets() as $worksheet) {
             $category = $this->validateFilename($worksheet->getTitle());
 
+            if ($this->categories && !in_array($category, $this->categories, true)) {
+                continue;
+            }
+
             foreach ($this->readWorksheet($worksheet, $category) as $language => $translations) {
-                $messages[$category][$this->validateFilename($language)] = $translations;
+                if (!$languages || in_array($language, $languages, true)) {
+                    $messages[$category][$this->validateFilename($language)] = $translations;
+                }
             }
         }
 
@@ -149,6 +191,10 @@ class TranslationController extends Controller
             $category = pathinfo($file, PATHINFO_FILENAME);
             $language = basename(dirname($file));
 
+            if ($this->categories && !in_array($category, $this->categories, true)) {
+                continue;
+            }
+
             $messages[$category][$language] = $this->loadMessageFile($file);
         }
 
@@ -157,7 +203,8 @@ class TranslationController extends Controller
 
     /**
      * A category without forced translation keys its messages by the source text, so the source language is the
-     * key column. With forced translation the keys are identifiers and the source language is a column of its own.
+     * key column. With forced translation the keys are identifiers and the source language is a column of its own,
+     * prepended as a locked reference when `languages` does not name it.
      *
      * @param array<string, array<string, string>> $languages
      */
@@ -166,19 +213,27 @@ class TranslationController extends Controller
         $sourceLanguage = $this->getSourceLanguage($category);
         $forced = $this->hasForcedTranslation($category);
 
+        // The keys of every language, whichever are exported, so a language without a file gets every row
         $keys = array_values(array_unique(array_merge(...array_values(array_map(array_keys(...), $languages)))));
 
-        if (!$forced) {
-            unset($languages[$sourceLanguage]);
+        $columns = $this->getLanguages() ?: array_keys($languages);
+        $hasReference = $forced && $this->languages && !in_array($sourceLanguage, $columns, true);
+
+        if ($hasReference) {
+            array_unshift($columns, $sourceLanguage);
         }
 
-        $rows = [[$forced ? 'key' : $sourceLanguage, ...array_keys($languages)]];
+        if (!$forced) {
+            $columns = array_values(array_diff($columns, [$sourceLanguage]));
+        }
+
+        $rows = [[$forced ? 'key' : $sourceLanguage, ...$columns]];
 
         foreach ($keys as $key) {
             $row = [(string)$key];
 
-            foreach ($languages as $translations) {
-                $row[] = $translations[$key] ?? '';
+            foreach ($columns as $language) {
+                $row[] = $languages[$language][$key] ?? '';
             }
 
             $rows[] = $row;
@@ -201,6 +256,10 @@ class TranslationController extends Controller
         $header = $worksheet->getStyle('1:1');
         $header->getFont()->setBold(true);
         $header->getProtection()->setLocked(Protection::PROTECTION_INHERIT);
+
+        if ($hasReference) {
+            $worksheet->getStyle('B1:B' . count($rows))->getProtection()->setLocked(Protection::PROTECTION_INHERIT);
+        }
 
         $worksheet->getStyle($worksheet->calculateWorksheetDimension())
             ->getAlignment()
@@ -304,6 +363,16 @@ class TranslationController extends Controller
         }
 
         return $result;
+    }
+
+    /**
+     * A language names a column, which the import turns into a directory.
+     *
+     * @return list<string>
+     */
+    private function getLanguages(): array
+    {
+        return array_values(array_unique(array_map($this->validateFilename(...), $this->languages)));
     }
 
     /**
