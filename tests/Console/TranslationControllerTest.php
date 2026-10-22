@@ -10,6 +10,7 @@ use Hirtz\Skeleton\Test\TestCase;
 use Hirtz\Skeleton\Test\Traits\StdOutBufferControllerTrait;
 use Hirtz\Translation\Console\Controllers\TranslationController;
 use Hirtz\Translation\Formats\Xliff;
+use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use Override;
 use PhpOffice\PhpSpreadsheet\Reader\Xlsx as XlsxReader;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -579,6 +580,43 @@ class TranslationControllerTest extends TestCase
 
         self::assertSame(ExitCode::OK, $exitCode);
         self::assertSame($before, $this->readMessageFileContent('fr'));
+    }
+
+    public function testTheTranslationCellsAreText(): void
+    {
+        $this->setForcedTranslation();
+        $this->writeMessageFile('de', ['PRICE' => '1.50']);
+
+        $this->export($this->path);
+
+        $worksheet = $this->loadWorksheet('translations.xlsx');
+        self::assertSame(NumberFormat::FORMAT_TEXT, $worksheet->getStyle('B2')->getNumberFormat()->getFormatCode());
+    }
+
+    public function testAnExcelRoundTripKeepsCarriageReturnsAndLongValues(): void
+    {
+        $this->setForcedTranslation();
+        $this->writeMessageFile('de', ['CR' => "Zeile 1\r\nZeile 2 – Ä", 'LONG' => str_repeat('ä', 33000)]);
+
+        $this->export($this->path);
+
+        $exitCode = $this->createController()->runAction('import', ['messagePath' => $this->path, "$this->path/translations.xlsx"]);
+        self::assertSame(ExitCode::OK, $exitCode);
+
+        $messages = $this->readMessageFile('de');
+        self::assertSame("Zeile 1\r\nZeile 2 – Ä", $messages['CR']);
+        self::assertSame(33000, mb_strlen($messages['LONG']));
+    }
+
+    public function testAControlCharacterIsRefusedByTheXliffExport(): void
+    {
+        $this->setForcedTranslation();
+        $this->writeMessageFile('de', ['CTRL' => "a\x01b"]);
+
+        $this->expectException(Exception::class);
+        $this->expectExceptionMessage('CTRL');
+
+        $this->createController()->runAction('export', ['messagePath' => $this->path, 'format' => 'xliff', 'languages' => 'de', $this->path]);
     }
 
     /**

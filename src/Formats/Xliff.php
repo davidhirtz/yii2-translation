@@ -40,6 +40,11 @@ class Xliff
             foreach ($catalog->keys as $key) {
                 $translation = $catalog->getTranslation($language, $key);
 
+                // XML 1.0 cannot hold a control character, which would leave the whole file unreadable.
+                if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $translation . $catalog->getSource($key) . $key)) {
+                    throw new Exception("The message \"$catalog->category: $key\" holds a control character XLIFF cannot store.");
+                }
+
                 $unit = $document->createElementNS(self::NAMESPACE, 'trans-unit');
                 $unit->setAttribute('id', $key);
                 $unit->setAttribute('resname', $key);

@@ -12,6 +12,7 @@ use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Reader\Xlsx as XlsxReader;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use PhpOffice\PhpSpreadsheet\Style\Protection;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
@@ -97,10 +98,14 @@ class Xlsx
         $header->getFont()->setBold(true);
         $header->getProtection()->setLocked(Protection::PROTECTION_INHERIT);
 
-        $worksheet->getStyle($worksheet->calculateWorksheetDimension())
-            ->getAlignment()
+        $style = $worksheet->getStyle($worksheet->calculateWorksheetDimension());
+
+        $style->getAlignment()
             ->setVertical(Alignment::VERTICAL_TOP)
             ->setWrapText(true);
+
+        // What a translator types stays text, `0042`, `1.50` and `=…` included.
+        $style->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
 
         $lastRow = count($rows);
 

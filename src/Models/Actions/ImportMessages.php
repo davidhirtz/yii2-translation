@@ -90,6 +90,8 @@ class ImportMessages
                     $translations = array_filter($translations, fn (string $translation): bool => $translation !== '');
                 }
 
+                $translations = $this->removeUnchanged($translations, $this->files->load($category, $language));
+
                 if ($translations && (!$this->languages || in_array($language, $this->languages, true))) {
                     $result[$category][$language] = $translations;
                 }
@@ -97,6 +99,33 @@ class ImportMessages
         }
 
         return $result;
+    }
+
+    /**
+     * Excel turns `\r\n` into `\n` and cuts a cell at 32,767 characters, which is no edit of the translation.
+     *
+     * @param array<string, string> $translations
+     * @param array<string, string> $current
+     * @return array<string, string>
+     */
+    protected function removeUnchanged(array $translations, array $current): array
+    {
+        foreach ($translations as $key => $translation) {
+            $previous = $current[$key] ?? null;
+
+            if (!is_string($previous)) {
+                continue;
+            }
+
+            $isLineEnding = str_replace(["\r\n", "\r"], "\n", $previous) === $translation;
+            $isCut = mb_strlen($translation) === 32767 && str_starts_with($previous, $translation);
+
+            if ($isLineEnding || $isCut) {
+                unset($translations[$key]);
+            }
+        }
+
+        return $translations;
     }
 
     /**
