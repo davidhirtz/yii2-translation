@@ -550,6 +550,37 @@ class TranslationControllerTest extends TestCase
         self::assertSame($before, $this->readMessageFileContent('de'));
     }
 
+    public function testAnImportKeepsASourceChangedSinceTheExport(): void
+    {
+        $this->setForcedTranslation();
+        $this->writeMessageFile('en-US', ['GREETING' => 'Old']);
+        $this->writeMessageFile('de', ['GREETING' => 'Alt']);
+
+        $this->export($this->path, ['languages' => 'de']);
+        $this->writeMessageFile('en-US', ['GREETING' => 'New']);
+
+        $exitCode = $this->createController()->runAction('import', ['messagePath' => $this->path, "$this->path/translations-de.xlsx"]);
+
+        self::assertSame(ExitCode::OK, $exitCode);
+        self::assertSame(['GREETING' => 'New'], $this->readMessageFile('en-US'));
+    }
+
+    public function testAnUneditedRoundTripWritesNoEmptyTranslation(): void
+    {
+        $this->setForcedTranslation();
+        $this->writeMessageFile('en-US', ['A' => 'A', 'B' => 'B']);
+        $this->writeMessageFile('de', ['A' => 'A de', 'B' => 'B de']);
+        $this->writeMessageFile('fr', ['A' => 'A fr']);
+        $before = $this->readMessageFileContent('fr');
+
+        $this->export($this->path);
+
+        $exitCode = $this->createController()->runAction('import', ['messagePath' => $this->path, "$this->path/translations.xlsx"]);
+
+        self::assertSame(ExitCode::OK, $exitCode);
+        self::assertSame($before, $this->readMessageFileContent('fr'));
+    }
+
     /**
      * Keys with line breaks, surrounding spaces and markup survive the attributes and text nodes.
      */

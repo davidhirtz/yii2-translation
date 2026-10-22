@@ -79,10 +79,18 @@ class ImportMessages
                 continue;
             }
 
+            $sourceLanguage = $this->files->getSourceLanguage($category);
+            $forced = $this->files->hasForcedTranslation($category);
+
             foreach ($translationsByLanguage as $language => $translations) {
                 $language = MessageFiles::validateName((string)$language);
 
-                if (!$this->languages || in_array($language, $this->languages, true)) {
+                // An empty cell is a translation not made, which the file leaves out rather than holding as `''`.
+                if ($forced || $language !== $sourceLanguage) {
+                    $translations = array_filter($translations, fn (string $translation): bool => $translation !== '');
+                }
+
+                if ($translations && (!$this->languages || in_array($language, $this->languages, true))) {
                     $result[$category][$language] = $translations;
                 }
             }

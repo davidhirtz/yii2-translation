@@ -44,8 +44,8 @@ class Xlsx
      */
     public static function read(string $filename, MessageFiles $files, array $categories = []): array
     {
+        // Not data only: the protection of the reference column is a style.
         $reader = new XlsxReader();
-        $reader->setReadDataOnly(true);
 
         $messages = [];
 
@@ -145,6 +145,13 @@ class Xlsx
 
         // Excel keeps the width of a column that once held a value, so the header can end in empty cells
         $languages = array_filter(array_slice($header, 1, preserve_keys: true));
+
+        // The reference column was locked for the translator: it holds the source as exported, not an edit.
+        $languages = array_filter(
+            $languages,
+            fn (int $index): bool => !self::isLocked($worksheet, $index),
+            ARRAY_FILTER_USE_KEY,
+        );
         $messages = [];
 
         foreach ($rows as $row) {
@@ -164,6 +171,14 @@ class Xlsx
         }
 
         return $messages;
+    }
+
+    private static function isLocked(Worksheet $worksheet, int $index): bool
+    {
+        $cell = Coordinate::stringFromColumnIndex($index + 1) . '2';
+
+        return $worksheet->getProtection()->getSheet()
+            && $worksheet->getStyle($cell)->getProtection()->getLocked() !== Protection::PROTECTION_UNPROTECTED;
     }
 
     private static function toString(mixed $value): string
