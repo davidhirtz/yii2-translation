@@ -7,8 +7,7 @@ namespace Hirtz\Translation\Models;
 use Hirtz\Translation\Helpers\IcuHelper;
 
 /**
- * The messages of one category. `languages` lacks the source language when the messages are keyed by their source
- * text; `reference` is the source language shown beside `languages` that do not name it.
+ * `languages` lacks the source language when the messages are keyed by their source text; `reference` stands in.
  */
 final readonly class Catalog
 {

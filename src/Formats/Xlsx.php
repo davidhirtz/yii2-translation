@@ -62,8 +62,8 @@ class Xlsx
     }
 
     /**
-     * The key column is followed by the reference and the languages; a category without forced translation keys
-     * its messages by the source text, so the key column is the source language.
+     * A category without forced translation keys its messages by the source text, so the key column is the source
+     * language.
      */
     private static function writeWorksheet(Worksheet $worksheet, Catalog $catalog, int $width): void
     {
